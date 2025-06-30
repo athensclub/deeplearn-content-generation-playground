@@ -1,5 +1,7 @@
 import { CourseGenerator } from "@/components/course-generator"
-import { BookOpen, Users, Target, Globe } from "lucide-react"
+import { BookOpen, Users, Target, Globe, FileText } from "lucide-react"
+import Link from "next/link"
+import { Button } from "@/components/ui/button"
 
 export default function HomePage() {
   return (
@@ -7,12 +9,20 @@ export default function HomePage() {
       {/* Header */}
       <header className="bg-white shadow-sm border-b">
         <div className="container mx-auto px-4 py-6">
-          <div className="flex items-center gap-3">
-            <BookOpen className="h-8 w-8 text-blue-600" />
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">English Course Builder</h1>
-              <p className="text-sm text-gray-600">Personalized English courses for your career</p>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <BookOpen className="h-8 w-8 text-blue-600" />
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900">English Course Builder</h1>
+                <p className="text-sm text-gray-600">Personalized English courses for your career</p>
+              </div>
             </div>
+            <Link href="/pdf-generator">
+              <Button variant="outline" className="flex items-center gap-2 bg-transparent">
+                <FileText className="h-4 w-4" />
+                Generate PDF Course
+              </Button>
+            </Link>
           </div>
         </div>
       </header>
@@ -25,6 +35,22 @@ export default function HomePage() {
             Generate customized English course outlines tailored to your industry, career goals, and current proficiency
             level. Perfect for adult learners looking to advance their professional communication skills.
           </p>
+
+          {/* Action Cards */}
+          <div className="grid md:grid-cols-2 gap-6 mb-12">
+            <div className="bg-white p-6 rounded-lg shadow-lg border-2 border-blue-200">
+              <BookOpen className="h-12 w-12 text-blue-600 mx-auto mb-4" />
+              <h3 className="text-xl font-semibold text-gray-900 mb-2">Course Outline</h3>
+              <p className="text-gray-600 mb-4">Generate structured course outlines with units and lessons</p>
+              <p className="text-sm text-blue-600 font-medium">Quick generation • Interactive display</p>
+            </div>
+            <div className="bg-white p-6 rounded-lg shadow-lg border-2 border-green-200">
+              <FileText className="h-12 w-12 text-green-600 mx-auto mb-4" />
+              <h3 className="text-xl font-semibold text-gray-900 mb-2">Complete PDF Course</h3>
+              <p className="text-gray-600 mb-4">Generate comprehensive course materials as downloadable PDF</p>
+              <p className="text-sm text-green-600 font-medium">Detailed content • Professional format</p>
+            </div>
+          </div>
 
           {/* Features */}
           <div className="grid md:grid-cols-3 gap-6 mb-12">
@@ -40,8 +66,8 @@ export default function HomePage() {
             </div>
             <div className="bg-white p-6 rounded-lg shadow-sm">
               <Globe className="h-8 w-8 text-purple-600 mx-auto mb-3" />
-              <h3 className="font-semibold text-gray-900 mb-2">Level-Appropriate</h3>
-              <p className="text-gray-600 text-sm">Structured according to CEFR levels from A1 to C2</p>
+              <h3 className="font-semibold text-gray-900 mb-2">Professional Quality</h3>
+              <p className="text-gray-600 text-sm">High-quality materials ready for immediate use</p>
             </div>
           </div>
         </div>
