@@ -9,7 +9,18 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Progress } from "@/components/ui/progress"
-import { Loader2, FileText, Download, Clock, CheckCircle, AlertCircle, Coffee, RotateCcw } from "lucide-react"
+import {
+  Loader2,
+  FileText,
+  Download,
+  Clock,
+  CheckCircle,
+  AlertCircle,
+  Coffee,
+  RotateCcw,
+  Building,
+  FileTextIcon,
+} from "lucide-react"
 
 interface PdfGenerationState {
   status: "idle" | "generating" | "completed" | "error"
@@ -47,6 +58,7 @@ const motivationalTips = [
   "🔄 Our system automatically retries failed requests to ensure reliable delivery.",
   "⚡ Multiple retry attempts with smart delays help overcome temporary network issues.",
   "🌐 Direct API connection ensures faster response times and better reliability.",
+  "📋 Custom outlines and corporate details enhance course relevance and specificity.",
 ]
 
 async function delay(ms: number): Promise<void> {
@@ -95,6 +107,11 @@ async function generateCoursePdfClient(data: {
   career: string
   objective: string
   level: string
+  outline?: string
+  corporate?: {
+    name: string
+    detail: string
+  }
 }): Promise<Blob> {
   const apiKey = process.env.NEXT_PUBLIC_DEEPLEARN_API_KEY
 
@@ -106,18 +123,33 @@ async function generateCoursePdfClient(data: {
   const endpoint = "/agents/course-pdf-generator"
 
   const makeApiCall = async (): Promise<Blob> => {
+    // Build request body with optional fields
+    const requestBody: any = {
+      industry: data.industry,
+      career: data.career,
+      objective: data.objective,
+      level: data.level,
+    }
+
+    // Add optional fields if provided
+    if (data.outline && data.outline.trim()) {
+      requestBody.outline = data.outline
+    }
+
+    if (data.corporate && data.corporate.name.trim() && data.corporate.detail.trim()) {
+      requestBody.corporate = {
+        name: data.corporate.name,
+        detail: data.corporate.detail,
+      }
+    }
+
     const response = await fetch(`${baseUrl}${endpoint}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify({
-        industry: data.industry,
-        career: data.career,
-        objective: data.objective,
-        level: data.level,
-      }),
+      body: JSON.stringify(requestBody),
     })
 
     if (!response.ok) {
@@ -164,6 +196,11 @@ export function CoursePdfGenerator() {
     industry: "",
     career: "",
     objective: "",
+    outline: "",
+    corporate: {
+      name: "",
+      detail: "",
+    },
   })
 
   const [generationState, setGenerationState] = useState<PdfGenerationState>({
@@ -274,55 +311,6 @@ export function CoursePdfGenerator() {
     CEFR_LEVELS.forEach(async (level) => {
       let retryCount = 0
 
-      const generateWithRetryTracking = async () => {
-        try {
-          const pdfBlob = await generateCoursePdfClient({
-            ...formData,
-            level: level.code,
-          })
-
-          // Create and trigger download immediately when this PDF is ready
-          const url = window.URL.createObjectURL(pdfBlob)
-          const link = document.createElement("a")
-          link.href = url
-          link.download = `${formData.career}-${formData.industry}-${level.code}-Course.pdf`
-          document.body.appendChild(link)
-          link.click()
-          document.body.removeChild(link)
-          window.URL.revokeObjectURL(url)
-
-          // Update state for this specific level completion
-          setGenerationState((prev) => {
-            const newCompletedCount = prev.completedCount + 1
-            return {
-              ...prev,
-              levels: {
-                ...prev.levels,
-                [level.code]: { status: "completed", progress: 100, retryCount: retryCount },
-              },
-              completedCount: newCompletedCount,
-              status: newCompletedCount === 6 ? "completed" : prev.status,
-            }
-          })
-        } catch (err) {
-          // Update state for this level with error
-          setGenerationState((prev) => ({
-            ...prev,
-            levels: {
-              ...prev.levels,
-              [level.code]: {
-                status: "error",
-                progress: 0,
-                error: err instanceof Error ? err.message : "Generation failed",
-                retryCount: retryCount,
-              },
-            },
-          }))
-        }
-      }
-
-      // Override the retry logic to track retry attempts
-      const originalRetryApiCall = retryApiCall
       const retryApiCallWithTracking = async <T,>(
         apiCall: () => Promise<T>,
         maxRetries = 3,
@@ -380,68 +368,20 @@ export function CoursePdfGenerator() {
         throw lastError!
       }
 
-      // Replace the global retryApiCall temporarily
-      const originalGenerateCoursePdfClient = generateCoursePdfClient
-      const generateCoursePdfClientWithTracking = async (data: any) => {
-        const apiKey = process.env.NEXT_PUBLIC_DEEPLEARN_API_KEY
-
-        if (!apiKey) {
-          throw new Error("API key not configured. Please contact support.")
-        }
-
-        const baseUrl = "https://deeplearn-ai-dev-440418065714.asia-southeast1.run.app"
-        const endpoint = "/agents/course-pdf-generator"
-
-        const makeApiCall = async (): Promise<Blob> => {
-          const response = await fetch(`${baseUrl}${endpoint}`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${apiKey}`,
-            },
-            body: JSON.stringify({
-              industry: data.industry,
-              career: data.career,
-              objective: data.objective,
-              level: data.level,
-            }),
-          })
-
-          if (!response.ok) {
-            if (response.status === 400) {
-              const errorData = await response.json().catch(() => ({}))
-              throw new Error(errorData.error || "Invalid request. Please check your input and try again.")
-            } else if (response.status === 401) {
-              throw new Error("Authentication failed. Please contact support.")
-            } else if (response.status === 500) {
-              throw new Error("Server error. Please try again later.")
-            } else {
-              throw new Error(`Request failed with status ${response.status}`)
-            }
-          }
-
-          const contentType = response.headers.get("content-type")
-          if (!contentType?.includes("application/pdf")) {
-            throw new Error("Invalid response format. Expected PDF file.")
-          }
-
-          const pdfBlob = await response.blob()
-
-          if (pdfBlob.size === 0) {
-            throw new Error("Received empty PDF file")
-          }
-
-          return pdfBlob
-        }
-
-        return await retryApiCallWithTracking(makeApiCall, 3, 2000)
-      }
-
       try {
-        const pdfBlob = await generateCoursePdfClientWithTracking({
-          ...formData,
-          level: level.code,
-        })
+        const pdfBlob = await retryApiCallWithTracking(
+          async () => {
+            return await generateCoursePdfClient({
+              ...formData,
+              level: level.code,
+              outline: formData.outline || undefined,
+              corporate:
+                formData.corporate.name.trim() && formData.corporate.detail.trim() ? formData.corporate : undefined,
+            })
+          },
+          3,
+          2000,
+        )
 
         // Create and trigger download immediately when this PDF is ready
         const url = window.URL.createObjectURL(pdfBlob)
@@ -498,7 +438,16 @@ export function CoursePdfGenerator() {
       completedCount: 0,
       totalCount: 6,
     })
-    setFormData({ industry: "", career: "", objective: "" })
+    setFormData({
+      industry: "",
+      career: "",
+      objective: "",
+      outline: "",
+      corporate: {
+        name: "",
+        detail: "",
+      },
+    })
     setCurrentTip(0)
   }
 
@@ -517,31 +466,40 @@ export function CoursePdfGenerator() {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-6">
+            {/* Required Fields */}
             <div className="grid md:grid-cols-2 gap-6">
               <div className="space-y-2">
-                <Label htmlFor="industry">Industry</Label>
+                <Label htmlFor="industry">
+                  Industry <span className="text-red-500">*</span>
+                </Label>
                 <Input
                   id="industry"
                   placeholder="e.g., Banking, Healthcare, Technology"
                   value={formData.industry}
                   onChange={(e) => setFormData((prev) => ({ ...prev, industry: e.target.value }))}
                   disabled={generationState.status === "generating"}
+                  required
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="career">Career/Role</Label>
+                <Label htmlFor="career">
+                  Career/Role <span className="text-red-500">*</span>
+                </Label>
                 <Input
                   id="career"
                   placeholder="e.g., Customer Service Representative, Sales Manager"
                   value={formData.career}
                   onChange={(e) => setFormData((prev) => ({ ...prev, career: e.target.value }))}
                   disabled={generationState.status === "generating"}
+                  required
                 />
               </div>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="objective">Course Objective</Label>
+              <Label htmlFor="objective">
+                Course Objective <span className="text-red-500">*</span>
+              </Label>
               <Textarea
                 id="objective"
                 placeholder="Describe the course goals, target audience, and learning approach. Be as detailed as possible..."
@@ -550,6 +508,7 @@ export function CoursePdfGenerator() {
                 disabled={generationState.status === "generating"}
                 rows={6}
                 className="resize-none"
+                required
               />
               <p className="text-sm text-gray-500">
                 Example: "This course is designed to equip banking professionals with practical English communication
@@ -557,11 +516,89 @@ export function CoursePdfGenerator() {
               </p>
             </div>
 
+            {/* Optional Fields */}
+            <div className="space-y-6">
+              <div className="border-t pt-6">
+                <div className="flex items-center gap-2 mb-4">
+                  <FileTextIcon className="h-5 w-5 text-blue-600" />
+                  <h3 className="text-lg font-semibold text-gray-900">Optional Fields</h3>
+                  <span className="text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded">Optional</span>
+                </div>
+                <p className="text-sm text-gray-600 mb-6">
+                  These fields are optional but can help create more customized and relevant course content.
+                </p>
+
+                {/* Course Outline */}
+                <div className="space-y-2 mb-6">
+                  <Label htmlFor="outline">Course Outline (Markdown Format)</Label>
+                  <Textarea
+                    id="outline"
+                    placeholder="Provide a detailed course outline in markdown format. This will be used to structure the PDF content..."
+                    value={formData.outline}
+                    onChange={(e) => setFormData((prev) => ({ ...prev, outline: e.target.value }))}
+                    disabled={generationState.status === "generating"}
+                    rows={8}
+                    className="resize-none font-mono text-sm"
+                  />
+                  <p className="text-sm text-gray-500">
+                    Example: Use markdown tables with columns like "Class | Topic | Learning Outcomes | Language Focus"
+                  </p>
+                </div>
+
+                {/* Corporate Information */}
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <Building className="h-4 w-4 text-blue-600" />
+                    <Label className="text-base font-medium">Corporate Information</Label>
+                    <span className="text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded">Optional</span>
+                  </div>
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="corporateName">Company Name</Label>
+                      <Input
+                        id="corporateName"
+                        placeholder="e.g., TechCorp, Bank of Excellence"
+                        value={formData.corporate.name}
+                        onChange={(e) =>
+                          setFormData((prev) => ({
+                            ...prev,
+                            corporate: { ...prev.corporate, name: e.target.value },
+                          }))
+                        }
+                        disabled={generationState.status === "generating"}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="corporateDetail">Company Details</Label>
+                      <Textarea
+                        id="corporateDetail"
+                        placeholder="Detailed information about the company, including relevant topics, sources, products, or services..."
+                        value={formData.corporate.detail}
+                        onChange={(e) =>
+                          setFormData((prev) => ({
+                            ...prev,
+                            corporate: { ...prev.corporate, detail: e.target.value },
+                          }))
+                        }
+                        disabled={generationState.status === "generating"}
+                        rows={4}
+                        className="resize-none"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-sm text-gray-500">
+                    Corporate information helps customize the course content with company-specific examples, products,
+                    and scenarios.
+                  </p>
+                </div>
+              </div>
+            </div>
+
             {generationState.status === "error" && (
               <div className="p-4 bg-red-50 border border-red-200 rounded-md">
                 <div className="flex items-center gap-2">
                   <AlertCircle className="h-4 w-4 text-red-600" />
-                  <p className="text-red-600 text-sm">Please fill in all required fields.</p>
+                  <p className="text-red-600 text-sm">Please fill in all required fields (marked with *).</p>
                 </div>
               </div>
             )}
@@ -742,6 +779,17 @@ export function CoursePdfGenerator() {
                     </div>
                   )
                 })}
+              </div>
+
+              {/* Show what was included */}
+              <div className="mt-4 p-3 bg-white rounded-lg border border-green-200">
+                <h4 className="font-medium text-green-900 mb-2">Generated with:</h4>
+                <div className="space-y-1 text-sm text-green-700">
+                  <div>✓ Industry: {formData.industry}</div>
+                  <div>✓ Career: {formData.career}</div>
+                  {formData.outline && <div>✓ Custom course outline included</div>}
+                  {formData.corporate.name && <div>✓ Corporate information: {formData.corporate.name}</div>}
+                </div>
               </div>
             </div>
           </CardContent>
