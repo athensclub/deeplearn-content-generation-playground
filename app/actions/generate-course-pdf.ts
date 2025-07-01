@@ -4,6 +4,7 @@ interface PdfRequest {
   industry: string
   career: string
   objective: string
+  level: string
 }
 
 export async function generateCoursePdf(data: PdfRequest): Promise<Blob> {
@@ -27,6 +28,7 @@ export async function generateCoursePdf(data: PdfRequest): Promise<Blob> {
         industry: data.industry,
         career: data.career,
         objective: data.objective,
+        level: data.level,
       }),
     })
 
@@ -46,7 +48,7 @@ export async function generateCoursePdf(data: PdfRequest): Promise<Blob> {
     // Check if response is actually a PDF
     const contentType = response.headers.get("content-type")
     if (!contentType?.includes("application/pdf")) {
-      throw new Error("Invalid response format. Expected PDF file.")
+      throw new Error("Invalid response format. Expected PDF file.Found " + response.headers)
     }
 
     const pdfBlob = await response.blob()

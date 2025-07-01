@@ -9,16 +9,31 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Progress } from "@/components/ui/progress"
-import { Loader2, FileText, Download, Clock, CheckCircle, AlertCircle, Coffee, Target } from "lucide-react"
+import { Loader2, FileText, Download, Clock, CheckCircle, AlertCircle, Coffee } from "lucide-react"
 import { generateCoursePdf } from "@/app/actions/generate-course-pdf"
 
 interface PdfGenerationState {
   status: "idle" | "generating" | "completed" | "error"
-  progress: number
+  levels: {
+    [key: string]: {
+      status: "pending" | "generating" | "completed" | "error"
+      progress: number
+      error?: string
+    }
+  }
   timeElapsed: number
-  estimatedTimeRemaining: number
-  error?: string
+  completedCount: number
+  totalCount: number
 }
+
+const CEFR_LEVELS = [
+  { code: "A1", name: "Beginner", description: "Basic phrases and simple interactions" },
+  { code: "A2", name: "Elementary", description: "Simple conversations and routine tasks" },
+  { code: "B1", name: "Intermediate", description: "Clear communication on familiar topics" },
+  { code: "B2", name: "Upper Intermediate", description: "Complex topics and professional discussions" },
+  { code: "C1", name: "Advanced", description: "Fluent and sophisticated language use" },
+  { code: "C2", name: "Proficient", description: "Near-native level mastery" },
+]
 
 const motivationalTips = [
   "💡 Tip: The detailed content being generated will save you hours of course preparation time!",
@@ -40,9 +55,16 @@ export function CoursePdfGenerator() {
 
   const [generationState, setGenerationState] = useState<PdfGenerationState>({
     status: "idle",
-    progress: 0,
+    levels: CEFR_LEVELS.reduce(
+      (acc, level) => ({
+        ...acc,
+        [level.code]: { status: "pending", progress: 0 },
+      }),
+      {},
+    ),
     timeElapsed: 0,
-    estimatedTimeRemaining: 600, // 10 minutes in seconds
+    completedCount: 0,
+    totalCount: 6,
   })
 
   const [currentTip, setCurrentTip] = useState(0)
@@ -55,14 +77,14 @@ export function CoursePdfGenerator() {
       interval = setInterval(() => {
         setGenerationState((prev) => {
           const newTimeElapsed = prev.timeElapsed + 1
-          const newProgress = Math.min((newTimeElapsed / 600) * 100, 95) // Cap at 95% until completion
-          const newEstimatedRemaining = Math.max(600 - newTimeElapsed, 0)
+          // const newProgress = Math.min((newTimeElapsed / 600) * 100, 95) // Cap at 95% until completion
+          // const newEstimatedRemaining = Math.max(600 - newTimeElapsed, 0)
 
           return {
             ...prev,
             timeElapsed: newTimeElapsed,
-            progress: newProgress,
-            estimatedTimeRemaining: newEstimatedRemaining,
+            // progress: newProgress,
+            // estimatedTimeRemaining: newEstimatedRemaining,
           }
         })
 
@@ -104,52 +126,93 @@ export function CoursePdfGenerator() {
       setGenerationState((prev) => ({
         ...prev,
         status: "error",
-        error: "Please fill in all fields",
       }))
       return
     }
 
+    // Initialize generation state
     setGenerationState({
       status: "generating",
-      progress: 0,
+      levels: CEFR_LEVELS.reduce(
+        (acc, level) => ({
+          ...acc,
+          [level.code]: { status: "generating", progress: 0 },
+        }),
+        {},
+      ),
       timeElapsed: 0,
-      estimatedTimeRemaining: 600,
-      error: undefined,
+      completedCount: 0,
+      totalCount: 6,
+    })
+
+    // Generate all levels in parallel
+    const promises = CEFR_LEVELS.map(async (level) => {
+      try {
+        const pdfBlob = await generateCoursePdf({
+          ...formData,
+          level: level.code,
+        })
+
+        // Create download link
+        const url = window.URL.createObjectURL(pdfBlob)
+        const link = document.createElement("a")
+        link.href = url
+        link.download = `${formData.career}-${formData.industry}-${level.code}-Course.pdf`
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+        window.URL.revokeObjectURL(url)
+
+        // Update state for this level
+        setGenerationState((prev) => ({
+          ...prev,
+          levels: {
+            ...prev.levels,
+            [level.code]: { status: "completed", progress: 100 },
+          },
+          completedCount: prev.completedCount + 1,
+          status: prev.completedCount + 1 === 6 ? "completed" : prev.status,
+        }))
+
+        return { level: level.code, success: true }
+      } catch (err) {
+        // Update state for this level with error
+        setGenerationState((prev) => ({
+          ...prev,
+          levels: {
+            ...prev.levels,
+            [level.code]: {
+              status: "error",
+              progress: 0,
+              error: err instanceof Error ? err.message : "Generation failed",
+            },
+          },
+        }))
+
+        return { level: level.code, success: false, error: err }
+      }
     })
 
     try {
-      const pdfBlob = await generateCoursePdf(formData)
-
-      // Create download link
-      const url = window.URL.createObjectURL(pdfBlob)
-      const link = document.createElement("a")
-      link.href = url
-      link.download = `${formData.career}-${formData.industry}-Course.pdf`
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      window.URL.revokeObjectURL(url)
-
-      setGenerationState((prev) => ({
-        ...prev,
-        status: "completed",
-        progress: 100,
-      }))
-    } catch (err) {
-      setGenerationState((prev) => ({
-        ...prev,
-        status: "error",
-        error: err instanceof Error ? err.message : "Failed to generate PDF",
-      }))
+      await Promise.allSettled(promises)
+    } catch (error) {
+      console.error("Error in PDF generation:", error)
     }
   }
 
   const handleReset = () => {
     setGenerationState({
       status: "idle",
-      progress: 0,
+      levels: CEFR_LEVELS.reduce(
+        (acc, level) => ({
+          ...acc,
+          [level.code]: { status: "pending", progress: 0 },
+        }),
+        {},
+      ),
       timeElapsed: 0,
-      estimatedTimeRemaining: 600,
+      completedCount: 0,
+      totalCount: 6,
     })
     setFormData({ industry: "", career: "", objective: "" })
     setCurrentTip(0)
@@ -214,7 +277,7 @@ export function CoursePdfGenerator() {
               <div className="p-4 bg-red-50 border border-red-200 rounded-md">
                 <div className="flex items-center gap-2">
                   <AlertCircle className="h-4 w-4 text-red-600" />
-                  <p className="text-red-600 text-sm">{generationState.error}</p>
+                  {/* <p className="text-red-600 text-sm">{generationState.error}</p> */}
                 </div>
               </div>
             )}
@@ -249,31 +312,67 @@ export function CoursePdfGenerator() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-blue-900">
               <Clock className="h-5 w-5" />
-              Generating Your Course PDF
+              Generating Course Package ({generationState.completedCount}/{generationState.totalCount} completed)
             </CardTitle>
             <CardDescription className="text-blue-700">
-              Please be patient while we create your comprehensive course materials.
+              Creating comprehensive course materials for all CEFR levels. Each PDF will download automatically when
+              ready.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
+            {/* Overall Progress */}
             <div className="space-y-2">
               <div className="flex justify-between text-sm">
-                <span className="text-blue-700">Progress</span>
-                <span className="text-blue-700">{Math.round(generationState.progress)}%</span>
+                <span className="text-blue-700">Overall Progress</span>
+                <span className="text-blue-700">
+                  {Math.round((generationState.completedCount / generationState.totalCount) * 100)}%
+                </span>
               </div>
-              <Progress value={generationState.progress} className="h-2" />
+              <Progress value={(generationState.completedCount / generationState.totalCount) * 100} className="h-2" />
             </div>
 
-            <div className="grid md:grid-cols-2 gap-4 text-sm">
+            {/* Individual Level Progress */}
+            <div className="space-y-3">
+              <h4 className="font-medium text-blue-900 text-sm">Individual Level Progress</h4>
+              <div className="grid md:grid-cols-2 gap-3">
+                {CEFR_LEVELS.map((level) => {
+                  const levelState = generationState.levels[level.code]
+                  return (
+                    <div key={level.code} className="bg-white p-3 rounded-lg border border-blue-200">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-sm">
+                            {level.code} - {level.name}
+                          </span>
+                          {levelState.status === "completed" && <CheckCircle className="h-4 w-4 text-green-600" />}
+                          {levelState.status === "error" && <AlertCircle className="h-4 w-4 text-red-600" />}
+                          {levelState.status === "generating" && (
+                            <Loader2 className="h-4 w-4 text-blue-600 animate-spin" />
+                          )}
+                        </div>
+                        <span className="text-xs text-gray-600 capitalize">{levelState.status}</span>
+                      </div>
+                      {levelState.status === "error" && levelState.error && (
+                        <p className="text-xs text-red-600 mb-2">{levelState.error}</p>
+                      )}
+                      <Progress
+                        value={levelState.status === "completed" ? 100 : levelState.status === "generating" ? 50 : 0}
+                        className="h-1"
+                      />
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-4 text-sm">
               <div className="flex items-center gap-2">
                 <Clock className="h-4 w-4 text-blue-600" />
                 <span className="text-blue-700">Time elapsed: {formatTime(generationState.timeElapsed)}</span>
               </div>
               <div className="flex items-center gap-2">
-                <Target className="h-4 w-4 text-blue-600" />
-                <span className="text-blue-700">
-                  Est. remaining: {formatTime(generationState.estimatedTimeRemaining)}
-                </span>
+                <Download className="h-4 w-4 text-blue-600" />
+                <span className="text-blue-700">Downloads: {generationState.completedCount}/6</span>
               </div>
             </div>
 
@@ -287,32 +386,6 @@ export function CoursePdfGenerator() {
                 </div>
               </div>
             </div>
-
-            {/* Status Indicators */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-              <div className="flex items-center gap-2 text-green-600">
-                <CheckCircle className="h-3 w-3" />
-                <span>Content Planning</span>
-              </div>
-              <div
-                className={`flex items-center gap-2 ${generationState.progress > 25 ? "text-green-600" : "text-gray-400"}`}
-              >
-                <CheckCircle className="h-3 w-3" />
-                <span>Material Generation</span>
-              </div>
-              <div
-                className={`flex items-center gap-2 ${generationState.progress > 60 ? "text-green-600" : "text-gray-400"}`}
-              >
-                <CheckCircle className="h-3 w-3" />
-                <span>PDF Formatting</span>
-              </div>
-              <div
-                className={`flex items-center gap-2 ${generationState.progress > 90 ? "text-green-600" : "text-gray-400"}`}
-              >
-                <CheckCircle className="h-3 w-3" />
-                <span>Final Review</span>
-              </div>
-            </div>
           </CardContent>
         </Card>
       )}
@@ -323,21 +396,47 @@ export function CoursePdfGenerator() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-green-900">
               <CheckCircle className="h-5 w-5" />
-              PDF Generated Successfully!
+              Course Package Generated Successfully!
             </CardTitle>
             <CardDescription className="text-green-700">
-              Your course PDF has been generated and downloaded automatically.
+              All 6 course PDFs (A1-C2 levels) have been generated and downloaded automatically.
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="flex items-center gap-4 text-sm text-green-700">
-              <div className="flex items-center gap-1">
-                <Download className="h-4 w-4" />
-                <span>Download completed</span>
+            <div className="space-y-4">
+              <div className="flex items-center gap-4 text-sm text-green-700">
+                <div className="flex items-center gap-1">
+                  <Download className="h-4 w-4" />
+                  <span>{generationState.completedCount} PDFs downloaded</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <Clock className="h-4 w-4" />
+                  <span>Generated in {formatTime(generationState.timeElapsed)}</span>
+                </div>
               </div>
-              <div className="flex items-center gap-1">
-                <Clock className="h-4 w-4" />
-                <span>Generated in {formatTime(generationState.timeElapsed)}</span>
+
+              {/* Show completed levels */}
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                {CEFR_LEVELS.map((level) => {
+                  const levelState = generationState.levels[level.code]
+                  return (
+                    <div
+                      key={level.code}
+                      className={`p-2 rounded text-xs flex items-center gap-2 ${
+                        levelState.status === "completed" ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
+                      }`}
+                    >
+                      {levelState.status === "completed" ? (
+                        <CheckCircle className="h-3 w-3" />
+                      ) : (
+                        <AlertCircle className="h-3 w-3" />
+                      )}
+                      <span>
+                        {level.code} - {level.name}
+                      </span>
+                    </div>
+                  )
+                })}
               </div>
             </div>
           </CardContent>
