@@ -10,7 +10,6 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Progress } from "@/components/ui/progress"
 import { Loader2, FileText, Download, Clock, CheckCircle, AlertCircle, Coffee, RotateCcw } from "lucide-react"
-import { generateCoursePdf } from "@/app/actions/generate-course-pdf"
 
 interface PdfGenerationState {
   status: "idle" | "generating" | "completed" | "error"
@@ -47,7 +46,118 @@ const motivationalTips = [
   "💼 Industry-specific vocabulary and terminology are being carefully integrated into your course.",
   "🔄 Our system automatically retries failed requests to ensure reliable delivery.",
   "⚡ Multiple retry attempts with smart delays help overcome temporary network issues.",
+  "🌐 Direct API connection ensures faster response times and better reliability.",
 ]
+
+async function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function retryApiCall<T>(apiCall: () => Promise<T>, maxRetries = 3, baseDelay = 2000): Promise<T> {
+  let lastError: Error
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await apiCall()
+    } catch (error) {
+      lastError = error as Error
+
+      // Don't retry on authentication errors (401) or bad request errors (400)
+      if (error instanceof Error && error.message.includes("Authentication failed")) {
+        throw error
+      }
+      if (error instanceof Error && error.message.includes("Invalid request")) {
+        throw error
+      }
+
+      // If this was the last attempt, throw the error
+      if (attempt === maxRetries) {
+        throw new Error(`Failed after ${maxRetries + 1} attempts. Last error: ${lastError.message}`)
+      }
+
+      // Calculate exponential backoff delay: baseDelay * 2^attempt + random jitter
+      const exponentialDelay = baseDelay * Math.pow(2, attempt)
+      const jitter = Math.random() * 2000 // Add up to 2 seconds of random jitter
+      const totalDelay = exponentialDelay + jitter
+
+      console.log(
+        `PDF API call failed (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${Math.round(totalDelay)}ms...`,
+      )
+      await delay(totalDelay)
+    }
+  }
+
+  throw lastError!
+}
+
+async function generateCoursePdfClient(data: {
+  industry: string
+  career: string
+  objective: string
+  level: string
+}): Promise<Blob> {
+  const apiKey = process.env.NEXT_PUBLIC_DEEPLEARN_API_KEY
+
+  if (!apiKey) {
+    throw new Error("API key not configured. Please contact support.")
+  }
+
+  const baseUrl = "https://deeplearn-ai-dev-440418065714.asia-southeast1.run.app"
+  const endpoint = "/agents/course-pdf-generator"
+
+  const makeApiCall = async (): Promise<Blob> => {
+    const response = await fetch(`${baseUrl}${endpoint}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        industry: data.industry,
+        career: data.career,
+        objective: data.objective,
+        level: data.level,
+      }),
+    })
+
+    if (!response.ok) {
+      if (response.status === 400) {
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(errorData.error || "Invalid request. Please check your input and try again.")
+      } else if (response.status === 401) {
+        throw new Error("Authentication failed. Please contact support.")
+      } else if (response.status === 500) {
+        throw new Error("Server error. Please try again later.")
+      } else {
+        throw new Error(`Request failed with status ${response.status}`)
+      }
+    }
+
+    // Check if response is actually a PDF
+    const contentType = response.headers.get("content-type")
+    if (!contentType?.includes("application/pdf")) {
+      throw new Error("Invalid response format. Expected PDF file.")
+    }
+
+    const pdfBlob = await response.blob()
+
+    // Validate that we received a valid PDF blob
+    if (pdfBlob.size === 0) {
+      throw new Error("Received empty PDF file")
+    }
+
+    return pdfBlob
+  }
+
+  try {
+    return await retryApiCall(makeApiCall, 3, 2000)
+  } catch (error) {
+    if (error instanceof Error) {
+      throw error
+    }
+    throw new Error("Failed to generate course PDF after multiple attempts. Please try again.")
+  }
+}
 
 export function CoursePdfGenerator() {
   const [formData, setFormData] = useState({
@@ -162,44 +272,173 @@ export function CoursePdfGenerator() {
 
     // Start all PDF generations in parallel immediately
     CEFR_LEVELS.forEach(async (level) => {
-      try {
-        // Update state to show retrying when needed
-        const originalGenerateCoursePdf = generateCoursePdf
-        const generateWithRetryTracking = async (data: any) => {
-          let retryCount = 0
-          const maxRetries = 3
+      let retryCount = 0
 
-          while (retryCount <= maxRetries) {
-            try {
-              if (retryCount > 0) {
-                // Update state to show retry attempt
-                setGenerationState((prev) => ({
-                  ...prev,
-                  levels: {
-                    ...prev.levels,
-                    [level.code]: {
-                      ...prev.levels[level.code],
-                      status: "retrying",
-                      retryCount: retryCount,
-                    },
-                  },
-                }))
-              }
+      const generateWithRetryTracking = async () => {
+        try {
+          const pdfBlob = await generateCoursePdfClient({
+            ...formData,
+            level: level.code,
+          })
 
-              return await originalGenerateCoursePdf(data)
-            } catch (error) {
-              retryCount++
-              if (retryCount > maxRetries) {
-                throw error
-              }
-              // Wait before retry (this is handled in the server action, but we track it here)
-              await new Promise((resolve) => setTimeout(resolve, 1000))
+          // Create and trigger download immediately when this PDF is ready
+          const url = window.URL.createObjectURL(pdfBlob)
+          const link = document.createElement("a")
+          link.href = url
+          link.download = `${formData.career}-${formData.industry}-${level.code}-Course.pdf`
+          document.body.appendChild(link)
+          link.click()
+          document.body.removeChild(link)
+          window.URL.revokeObjectURL(url)
+
+          // Update state for this specific level completion
+          setGenerationState((prev) => {
+            const newCompletedCount = prev.completedCount + 1
+            return {
+              ...prev,
+              levels: {
+                ...prev.levels,
+                [level.code]: { status: "completed", progress: 100, retryCount: retryCount },
+              },
+              completedCount: newCompletedCount,
+              status: newCompletedCount === 6 ? "completed" : prev.status,
             }
+          })
+        } catch (err) {
+          // Update state for this level with error
+          setGenerationState((prev) => ({
+            ...prev,
+            levels: {
+              ...prev.levels,
+              [level.code]: {
+                status: "error",
+                progress: 0,
+                error: err instanceof Error ? err.message : "Generation failed",
+                retryCount: retryCount,
+              },
+            },
+          }))
+        }
+      }
+
+      // Override the retry logic to track retry attempts
+      const originalRetryApiCall = retryApiCall
+      const retryApiCallWithTracking = async <T,>(
+        apiCall: () => Promise<T>,
+        maxRetries = 3,
+        baseDelay = 2000,
+      ): Promise<T> => {
+        let lastError: Error
+
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+          try {
+            if (attempt > 0) {
+              retryCount = attempt
+              // Update state to show retry attempt
+              setGenerationState((prev) => ({
+                ...prev,
+                levels: {
+                  ...prev.levels,
+                  [level.code]: {
+                    ...prev.levels[level.code],
+                    status: "retrying",
+                    retryCount: attempt,
+                  },
+                },
+              }))
+            }
+
+            return await apiCall()
+          } catch (error) {
+            lastError = error as Error
+
+            // Don't retry on authentication errors (401) or bad request errors (400)
+            if (error instanceof Error && error.message.includes("Authentication failed")) {
+              throw error
+            }
+            if (error instanceof Error && error.message.includes("Invalid request")) {
+              throw error
+            }
+
+            // If this was the last attempt, throw the error
+            if (attempt === maxRetries) {
+              throw new Error(`Failed after ${maxRetries + 1} attempts. Last error: ${lastError.message}`)
+            }
+
+            // Calculate exponential backoff delay
+            const exponentialDelay = baseDelay * Math.pow(2, attempt)
+            const jitter = Math.random() * 2000
+            const totalDelay = exponentialDelay + jitter
+
+            console.log(
+              `PDF API call failed for ${level.code} (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${Math.round(totalDelay)}ms...`,
+            )
+            await delay(totalDelay)
           }
         }
 
-        // Start the API call for this level
-        const pdfBlob = await generateWithRetryTracking({
+        throw lastError!
+      }
+
+      // Replace the global retryApiCall temporarily
+      const originalGenerateCoursePdfClient = generateCoursePdfClient
+      const generateCoursePdfClientWithTracking = async (data: any) => {
+        const apiKey = process.env.NEXT_PUBLIC_DEEPLEARN_API_KEY
+
+        if (!apiKey) {
+          throw new Error("API key not configured. Please contact support.")
+        }
+
+        const baseUrl = "https://deeplearn-ai-dev-440418065714.asia-southeast1.run.app"
+        const endpoint = "/agents/course-pdf-generator"
+
+        const makeApiCall = async (): Promise<Blob> => {
+          const response = await fetch(`${baseUrl}${endpoint}`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({
+              industry: data.industry,
+              career: data.career,
+              objective: data.objective,
+              level: data.level,
+            }),
+          })
+
+          if (!response.ok) {
+            if (response.status === 400) {
+              const errorData = await response.json().catch(() => ({}))
+              throw new Error(errorData.error || "Invalid request. Please check your input and try again.")
+            } else if (response.status === 401) {
+              throw new Error("Authentication failed. Please contact support.")
+            } else if (response.status === 500) {
+              throw new Error("Server error. Please try again later.")
+            } else {
+              throw new Error(`Request failed with status ${response.status}`)
+            }
+          }
+
+          const contentType = response.headers.get("content-type")
+          if (!contentType?.includes("application/pdf")) {
+            throw new Error("Invalid response format. Expected PDF file.")
+          }
+
+          const pdfBlob = await response.blob()
+
+          if (pdfBlob.size === 0) {
+            throw new Error("Received empty PDF file")
+          }
+
+          return pdfBlob
+        }
+
+        return await retryApiCallWithTracking(makeApiCall, 3, 2000)
+      }
+
+      try {
+        const pdfBlob = await generateCoursePdfClientWithTracking({
           ...formData,
           level: level.code,
         })
@@ -221,7 +460,7 @@ export function CoursePdfGenerator() {
             ...prev,
             levels: {
               ...prev.levels,
-              [level.code]: { status: "completed", progress: 100, retryCount: prev.levels[level.code].retryCount },
+              [level.code]: { status: "completed", progress: 100, retryCount: retryCount },
             },
             completedCount: newCompletedCount,
             status: newCompletedCount === 6 ? "completed" : prev.status,
@@ -237,7 +476,7 @@ export function CoursePdfGenerator() {
               status: "error",
               progress: 0,
               error: err instanceof Error ? err.message : "Generation failed",
-              retryCount: prev.levels[level.code].retryCount || 0,
+              retryCount: retryCount,
             },
           },
         }))
@@ -272,8 +511,8 @@ export function CoursePdfGenerator() {
             Course PDF Information
           </CardTitle>
           <CardDescription>
-            Provide detailed information about your course requirements. Our system automatically retries failed
-            requests up to 3 times for reliability.
+            Provide detailed information about your course requirements. Our system makes direct API calls with
+            automatic retry (up to 3 attempts) for maximum reliability and timeout avoidance.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -347,6 +586,12 @@ export function CoursePdfGenerator() {
                 </Button>
               )}
             </div>
+
+            {/* Direct API Info */}
+            <div className="flex items-center gap-2 text-sm text-gray-600">
+              <RotateCcw className="h-4 w-4" />
+              <span>Direct API connection • Auto-retry enabled (up to 3 attempts) • No server timeouts</span>
+            </div>
           </form>
         </CardContent>
       </Card>
@@ -360,8 +605,8 @@ export function CoursePdfGenerator() {
               Generating Course Package ({generationState.completedCount}/{generationState.totalCount} completed)
             </CardTitle>
             <CardDescription className="text-blue-700">
-              Creating comprehensive course materials for all CEFR levels. Each PDF will download automatically when
-              ready. Failed requests are automatically retried up to 3 times.
+              Creating comprehensive course materials for all CEFR levels via direct API connection. Each PDF will
+              download automatically when ready.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -428,7 +673,7 @@ export function CoursePdfGenerator() {
               </div>
               <div className="flex items-center gap-2">
                 <RotateCcw className="h-4 w-4 text-orange-600" />
-                <span className="text-blue-700">Auto-retry enabled</span>
+                <span className="text-blue-700">Direct API</span>
               </div>
             </div>
 
@@ -455,7 +700,8 @@ export function CoursePdfGenerator() {
               Course Package Generated Successfully!
             </CardTitle>
             <CardDescription className="text-green-700">
-              All 6 course PDFs (A1-C2 levels) have been generated and downloaded automatically.
+              All 6 course PDFs (A1-C2 levels) have been generated via direct API connection and downloaded
+              automatically.
             </CardDescription>
           </CardHeader>
           <CardContent>
