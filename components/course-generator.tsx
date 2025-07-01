@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Loader2, BookOpen, Target } from "lucide-react"
+import { Loader2, BookOpen, Target, RotateCcw } from "lucide-react"
 import { generateCourseOutline } from "@/app/actions/generate-course"
 import { CourseOutlineDisplay } from "./course-outline-display"
 
@@ -82,7 +82,7 @@ export function CourseGenerator() {
           </CardTitle>
           <CardDescription>
             Tell us about your industry, career goals, and current English level to generate a personalized course
-            outline.
+            outline. Our system automatically retries failed requests up to 3 times for reliability.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -158,6 +158,12 @@ export function CourseGenerator() {
                   Create New Course
                 </Button>
               )}
+            </div>
+
+            {/* Retry Info */}
+            <div className="flex items-center gap-2 text-sm text-gray-600">
+              <RotateCcw className="h-4 w-4" />
+              <span>Automatic retry enabled (up to 3 attempts)</span>
             </div>
           </form>
         </CardContent>

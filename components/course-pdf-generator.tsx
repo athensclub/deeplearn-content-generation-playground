@@ -9,16 +9,17 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Progress } from "@/components/ui/progress"
-import { Loader2, FileText, Download, Clock, CheckCircle, AlertCircle, Coffee } from "lucide-react"
+import { Loader2, FileText, Download, Clock, CheckCircle, AlertCircle, Coffee, RotateCcw } from "lucide-react"
 import { generateCoursePdf } from "@/app/actions/generate-course-pdf"
 
 interface PdfGenerationState {
   status: "idle" | "generating" | "completed" | "error"
   levels: {
     [key: string]: {
-      status: "pending" | "generating" | "completed" | "error"
+      status: "pending" | "generating" | "completed" | "error" | "retrying"
       progress: number
       error?: string
+      retryCount?: number
     }
   }
   timeElapsed: number
@@ -44,6 +45,8 @@ const motivationalTips = [
   "🚀 Your comprehensive course PDF will include practical examples and real-world scenarios.",
   "📖 The generated content will be professionally formatted and ready to use immediately.",
   "💼 Industry-specific vocabulary and terminology are being carefully integrated into your course.",
+  "🔄 Our system automatically retries failed requests to ensure reliable delivery.",
+  "⚡ Multiple retry attempts with smart delays help overcome temporary network issues.",
 ]
 
 export function CoursePdfGenerator() {
@@ -58,7 +61,7 @@ export function CoursePdfGenerator() {
     levels: CEFR_LEVELS.reduce(
       (acc, level) => ({
         ...acc,
-        [level.code]: { status: "pending", progress: 0 },
+        [level.code]: { status: "pending", progress: 0, retryCount: 0 },
       }),
       {},
     ),
@@ -77,14 +80,26 @@ export function CoursePdfGenerator() {
       interval = setInterval(() => {
         setGenerationState((prev) => {
           const newTimeElapsed = prev.timeElapsed + 1
-          // const newProgress = Math.min((newTimeElapsed / 600) * 100, 95) // Cap at 95% until completion
-          // const newEstimatedRemaining = Math.max(600 - newTimeElapsed, 0)
+
+          // Simulate progress for generating levels
+          const updatedLevels = { ...prev.levels }
+          Object.keys(updatedLevels).forEach((levelCode) => {
+            if (updatedLevels[levelCode].status === "generating") {
+              // Simulate progress up to 90%, then wait for actual completion
+              const currentProgress = updatedLevels[levelCode].progress
+              if (currentProgress < 90) {
+                updatedLevels[levelCode] = {
+                  ...updatedLevels[levelCode],
+                  progress: Math.min(currentProgress + Math.random() * 3, 90),
+                }
+              }
+            }
+          })
 
           return {
             ...prev,
             timeElapsed: newTimeElapsed,
-            // progress: newProgress,
-            // estimatedTimeRemaining: newEstimatedRemaining,
+            levels: updatedLevels,
           }
         })
 
@@ -136,7 +151,7 @@ export function CoursePdfGenerator() {
       levels: CEFR_LEVELS.reduce(
         (acc, level) => ({
           ...acc,
-          [level.code]: { status: "generating", progress: 0 },
+          [level.code]: { status: "generating", progress: 0, retryCount: 0 },
         }),
         {},
       ),
@@ -145,15 +160,51 @@ export function CoursePdfGenerator() {
       totalCount: 6,
     })
 
-    // Generate all levels in parallel
-    const promises = CEFR_LEVELS.map(async (level) => {
+    // Start all PDF generations in parallel immediately
+    CEFR_LEVELS.forEach(async (level) => {
       try {
-        const pdfBlob = await generateCoursePdf({
+        // Update state to show retrying when needed
+        const originalGenerateCoursePdf = generateCoursePdf
+        const generateWithRetryTracking = async (data: any) => {
+          let retryCount = 0
+          const maxRetries = 3
+
+          while (retryCount <= maxRetries) {
+            try {
+              if (retryCount > 0) {
+                // Update state to show retry attempt
+                setGenerationState((prev) => ({
+                  ...prev,
+                  levels: {
+                    ...prev.levels,
+                    [level.code]: {
+                      ...prev.levels[level.code],
+                      status: "retrying",
+                      retryCount: retryCount,
+                    },
+                  },
+                }))
+              }
+
+              return await originalGenerateCoursePdf(data)
+            } catch (error) {
+              retryCount++
+              if (retryCount > maxRetries) {
+                throw error
+              }
+              // Wait before retry (this is handled in the server action, but we track it here)
+              await new Promise((resolve) => setTimeout(resolve, 1000))
+            }
+          }
+        }
+
+        // Start the API call for this level
+        const pdfBlob = await generateWithRetryTracking({
           ...formData,
           level: level.code,
         })
 
-        // Create download link
+        // Create and trigger download immediately when this PDF is ready
         const url = window.URL.createObjectURL(pdfBlob)
         const link = document.createElement("a")
         link.href = url
@@ -163,18 +214,19 @@ export function CoursePdfGenerator() {
         document.body.removeChild(link)
         window.URL.revokeObjectURL(url)
 
-        // Update state for this level
-        setGenerationState((prev) => ({
-          ...prev,
-          levels: {
-            ...prev.levels,
-            [level.code]: { status: "completed", progress: 100 },
-          },
-          completedCount: prev.completedCount + 1,
-          status: prev.completedCount + 1 === 6 ? "completed" : prev.status,
-        }))
-
-        return { level: level.code, success: true }
+        // Update state for this specific level completion
+        setGenerationState((prev) => {
+          const newCompletedCount = prev.completedCount + 1
+          return {
+            ...prev,
+            levels: {
+              ...prev.levels,
+              [level.code]: { status: "completed", progress: 100, retryCount: prev.levels[level.code].retryCount },
+            },
+            completedCount: newCompletedCount,
+            status: newCompletedCount === 6 ? "completed" : prev.status,
+          }
+        })
       } catch (err) {
         // Update state for this level with error
         setGenerationState((prev) => ({
@@ -185,19 +237,12 @@ export function CoursePdfGenerator() {
               status: "error",
               progress: 0,
               error: err instanceof Error ? err.message : "Generation failed",
+              retryCount: prev.levels[level.code].retryCount || 0,
             },
           },
         }))
-
-        return { level: level.code, success: false, error: err }
       }
     })
-
-    try {
-      await Promise.allSettled(promises)
-    } catch (error) {
-      console.error("Error in PDF generation:", error)
-    }
   }
 
   const handleReset = () => {
@@ -206,7 +251,7 @@ export function CoursePdfGenerator() {
       levels: CEFR_LEVELS.reduce(
         (acc, level) => ({
           ...acc,
-          [level.code]: { status: "pending", progress: 0 },
+          [level.code]: { status: "pending", progress: 0, retryCount: 0 },
         }),
         {},
       ),
@@ -227,8 +272,8 @@ export function CoursePdfGenerator() {
             Course PDF Information
           </CardTitle>
           <CardDescription>
-            Provide detailed information about your course requirements. The more specific your objective, the better
-            the generated content will be.
+            Provide detailed information about your course requirements. Our system automatically retries failed
+            requests up to 3 times for reliability.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -277,7 +322,7 @@ export function CoursePdfGenerator() {
               <div className="p-4 bg-red-50 border border-red-200 rounded-md">
                 <div className="flex items-center gap-2">
                   <AlertCircle className="h-4 w-4 text-red-600" />
-                  {/* <p className="text-red-600 text-sm">{generationState.error}</p> */}
+                  <p className="text-red-600 text-sm">Please fill in all required fields.</p>
                 </div>
               </div>
             )}
@@ -287,18 +332,18 @@ export function CoursePdfGenerator() {
                 {generationState.status === "generating" ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Generating PDF...
+                    Generating PDFs...
                   </>
                 ) : (
                   <>
                     <FileText className="mr-2 h-4 w-4" />
-                    Generate Course PDF
+                    Generate Course PDFs (All Levels)
                   </>
                 )}
               </Button>
               {(generationState.status === "completed" || generationState.status === "error") && (
                 <Button type="button" variant="outline" onClick={handleReset}>
-                  Generate New PDF
+                  Generate New PDFs
                 </Button>
               )}
             </div>
@@ -316,7 +361,7 @@ export function CoursePdfGenerator() {
             </CardTitle>
             <CardDescription className="text-blue-700">
               Creating comprehensive course materials for all CEFR levels. Each PDF will download automatically when
-              ready.
+              ready. Failed requests are automatically retried up to 3 times.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -349,16 +394,23 @@ export function CoursePdfGenerator() {
                           {levelState.status === "generating" && (
                             <Loader2 className="h-4 w-4 text-blue-600 animate-spin" />
                           )}
+                          {levelState.status === "retrying" && (
+                            <RotateCcw className="h-4 w-4 text-orange-600 animate-spin" />
+                          )}
                         </div>
-                        <span className="text-xs text-gray-600 capitalize">{levelState.status}</span>
+                        <div className="flex items-center gap-2">
+                          {levelState.retryCount && levelState.retryCount > 0 && (
+                            <span className="text-xs text-orange-600">Retry {levelState.retryCount}/3</span>
+                          )}
+                          <span className="text-xs text-gray-600 capitalize">
+                            {levelState.status === "retrying" ? "retrying" : levelState.status}
+                          </span>
+                        </div>
                       </div>
                       {levelState.status === "error" && levelState.error && (
                         <p className="text-xs text-red-600 mb-2">{levelState.error}</p>
                       )}
-                      <Progress
-                        value={levelState.status === "completed" ? 100 : levelState.status === "generating" ? 50 : 0}
-                        className="h-1"
-                      />
+                      <Progress value={levelState.status === "completed" ? 100 : levelState.progress} className="h-1" />
                     </div>
                   )
                 })}
@@ -373,6 +425,10 @@ export function CoursePdfGenerator() {
               <div className="flex items-center gap-2">
                 <Download className="h-4 w-4 text-blue-600" />
                 <span className="text-blue-700">Downloads: {generationState.completedCount}/6</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <RotateCcw className="h-4 w-4 text-orange-600" />
+                <span className="text-blue-700">Auto-retry enabled</span>
               </div>
             </div>
 
@@ -433,6 +489,9 @@ export function CoursePdfGenerator() {
                       )}
                       <span>
                         {level.code} - {level.name}
+                        {levelState.retryCount && levelState.retryCount > 0 && (
+                          <span className="ml-1 text-orange-600">(Retried {levelState.retryCount}x)</span>
+                        )}
                       </span>
                     </div>
                   )

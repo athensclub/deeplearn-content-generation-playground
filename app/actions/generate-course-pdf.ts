@@ -7,6 +7,47 @@ interface PdfRequest {
   level: string
 }
 
+async function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function retryApiCall<T>(apiCall: () => Promise<T>, maxRetries = 3, baseDelay = 2000): Promise<T> {
+  let lastError: Error
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await apiCall()
+    } catch (error) {
+      lastError = error as Error
+
+      // Don't retry on authentication errors (401) or bad request errors (400)
+      if (error instanceof Error && error.message.includes("Authentication failed")) {
+        throw error
+      }
+      if (error instanceof Error && error.message.includes("Invalid request")) {
+        throw error
+      }
+
+      // If this was the last attempt, throw the error
+      if (attempt === maxRetries) {
+        throw new Error(`Failed after ${maxRetries + 1} attempts. Last error: ${lastError.message}`)
+      }
+
+      // Calculate exponential backoff delay: baseDelay * 2^attempt + random jitter
+      const exponentialDelay = baseDelay * Math.pow(2, attempt)
+      const jitter = Math.random() * 2000 // Add up to 2 seconds of random jitter
+      const totalDelay = exponentialDelay + jitter
+
+      console.log(
+        `PDF API call failed (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${Math.round(totalDelay)}ms...`,
+      )
+      await delay(totalDelay)
+    }
+  }
+
+  throw lastError!
+}
+
 export async function generateCoursePdf(data: PdfRequest): Promise<Blob> {
   const apiKey = process.env.DEEPLEARN_API_KEY
 
@@ -17,7 +58,7 @@ export async function generateCoursePdf(data: PdfRequest): Promise<Blob> {
   const baseUrl = "https://deeplearn-ai-dev-440418065714.asia-southeast1.run.app"
   const endpoint = "/agents/course-pdf-generator"
 
-  try {
+  const makeApiCall = async (): Promise<Blob> => {
     const response = await fetch(`${baseUrl}${endpoint}`, {
       method: "POST",
       headers: {
@@ -48,7 +89,7 @@ export async function generateCoursePdf(data: PdfRequest): Promise<Blob> {
     // Check if response is actually a PDF
     const contentType = response.headers.get("content-type")
     if (!contentType?.includes("application/pdf")) {
-      throw new Error("Invalid response format. Expected PDF file.Found " + response.headers)
+      throw new Error("Invalid response format. Expected PDF file.")
     }
 
     const pdfBlob = await response.blob()
@@ -59,10 +100,14 @@ export async function generateCoursePdf(data: PdfRequest): Promise<Blob> {
     }
 
     return pdfBlob
+  }
+
+  try {
+    return await retryApiCall(makeApiCall, 3, 2000)
   } catch (error) {
     if (error instanceof Error) {
       throw error
     }
-    throw new Error("Failed to generate course PDF. Please try again.")
+    throw new Error("Failed to generate course PDF after multiple attempts. Please try again.")
   }
 }
