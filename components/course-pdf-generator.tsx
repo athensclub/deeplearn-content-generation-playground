@@ -38,12 +38,12 @@ interface PdfGenerationState {
 }
 
 const CEFR_LEVELS = [
-  { code: "A1", name: "Beginner", description: "Basic phrases and simple interactions" },
-  { code: "A2", name: "Elementary", description: "Simple conversations and routine tasks" },
-  { code: "B1", name: "Intermediate", description: "Clear communication on familiar topics" },
-  { code: "B2", name: "Upper Intermediate", description: "Complex topics and professional discussions" },
-  { code: "C1", name: "Advanced", description: "Fluent and sophisticated language use" },
-  { code: "C2", name: "Proficient", description: "Near-native level mastery" },
+  { code: "G1", name: "Beginner", description: "Basic phrases and simple interactions" },
+  { code: "G2", name: "Elementary", description: "Simple conversations and routine tasks" },
+  { code: "G3", name: "Intermediate", description: "Clear communication on familiar topics" },
+  { code: "G4", name: "Upper Intermediate", description: "Complex topics and professional discussions" },
+  { code: "G5", name: "Advanced", description: "Fluent and sophisticated language use" },
+  { code: "G6", name: "Proficient", description: "Near-native level mastery" },
 ]
 
 const motivationalTips = [
@@ -120,7 +120,7 @@ async function generateCoursePdfClient(data: {
   }
 
   const baseUrl = "https://deeplearn-ai-dev-440418065714.asia-southeast1.run.app"
-  const endpoint = "/agents/course-pdf-generator"
+  const endpoint = "/agents/course-pdf-generator-one-shot"
 
   const makeApiCall = async (): Promise<Blob> => {
     // Build request body with optional fields
