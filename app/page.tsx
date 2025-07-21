@@ -17,12 +17,20 @@ export default function HomePage() {
                 <p className="text-sm text-gray-600">Personalized English courses for your career</p>
               </div>
             </div>
-            <Link href="/pdf-generator">
-              <Button variant="outline" className="flex items-center gap-2 bg-transparent">
-                <FileText className="h-4 w-4" />
-                Generate PDF Course
-              </Button>
-            </Link>
+            <div className="flex gap-2">
+              <Link href="/pdf-generator">
+                <Button variant="outline" className="flex items-center gap-2 bg-transparent">
+                  <FileText className="h-4 w-4" />
+                  Generate PDF Course
+                </Button>
+              </Link>
+              <Link href="/self-learn-pdf-generator">
+                <Button variant="outline" className="flex items-center gap-2 bg-transparent">
+                  <BookOpen className="h-4 w-4" />
+                  Self-Learning PDFs
+                </Button>
+              </Link>
+            </div>
           </div>
         </div>
       </header>
@@ -37,7 +45,7 @@ export default function HomePage() {
           </p>
 
           {/* Action Cards */}
-          <div className="grid md:grid-cols-2 gap-6 mb-12">
+          <div className="grid md:grid-cols-3 gap-6 mb-12">
             <div className="bg-white p-6 rounded-lg shadow-lg border-2 border-blue-200">
               <BookOpen className="h-12 w-12 text-blue-600 mx-auto mb-4" />
               <h3 className="text-xl font-semibold text-gray-900 mb-2">Course Outline</h3>
@@ -49,6 +57,12 @@ export default function HomePage() {
               <h3 className="text-xl font-semibold text-gray-900 mb-2">Complete PDF Course</h3>
               <p className="text-gray-600 mb-4">Generate comprehensive course materials as downloadable PDF</p>
               <p className="text-sm text-green-600 font-medium">Detailed content • Professional format</p>
+            </div>
+            <div className="bg-white p-6 rounded-lg shadow-lg border-2 border-purple-200">
+              <Users className="h-12 w-12 text-purple-600 mx-auto mb-4" />
+              <h3 className="text-xl font-semibold text-gray-900 mb-2">Self-Learning PDFs</h3>
+              <p className="text-gray-600 mb-4">Create self-paced learning materials for independent study</p>
+              <p className="text-sm text-purple-600 font-medium">Flexible input • Bulk generation</p>
             </div>
           </div>
 
