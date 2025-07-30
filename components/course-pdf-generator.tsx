@@ -119,8 +119,8 @@ async function generateCoursePdfClient(data: {
     throw new Error("API key not configured. Please contact support.")
   }
 
-  const baseUrl = "https://deeplearn-ai-dev-440418065714.asia-southeast1.run.app"
-  const endpoint = "/agents/course-pdf-generator-one-shot"
+  const baseUrl = "http://localhost:8787"
+  const endpoint = "/pdf/course-pdf-generator"
 
   const makeApiCall = async (): Promise<Blob> => {
     // Build request body with optional fields

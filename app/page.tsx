@@ -30,6 +30,12 @@ export default function HomePage() {
                   Self-Learning PDFs
                 </Button>
               </Link>
+              <Link href="/syllabus-pdf-generator">
+                <Button variant="outline" className="flex items-center gap-2 bg-transparent">
+                  <Users className="h-4 w-4" />
+                  Syllabus PDF Generator
+                </Button>
+              </Link>
             </div>
           </div>
         </div>
