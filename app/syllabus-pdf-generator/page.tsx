@@ -26,28 +26,42 @@ export default function SyllabusPdfGeneratorPage() {
     await Promise.all(
       LEVELS.map(async (level) => {
         setProgress(prev => ({ ...prev, [level]: "downloading" }))
-        try {
-          const res = await fetch(`${baseUrl}${endpoint}`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ industry, career, objective, level })
+        let attempt = 0;
+        let success = false;
+        let lastError = null;
+        while (attempt < 3 && !success) {
+          try {
+            const res = await fetch(`${baseUrl}${endpoint}`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ industry, career, objective, level })
+              }
+            )
+            if (!res.ok) throw new Error(`Failed for ${level} (attempt ${attempt + 1})`)
+            const blob = await res.blob()
+            const url = window.URL.createObjectURL(blob)
+            const a = document.createElement("a")
+            a.href = url
+            a.download = `syllabus_${industry}_${career}_${level}.pdf`
+            document.body.appendChild(a)
+            a.click()
+            a.remove()
+            window.URL.revokeObjectURL(url)
+            setProgress(prev => ({ ...prev, [level]: "done" }))
+            success = true;
+          } catch (err) {
+            attempt++;
+            lastError = err;
+            if (attempt < 3) {
+              // Optionally, add a small delay before retrying
+              await new Promise(res => setTimeout(res, 500));
             }
-          )
-          if (!res.ok) throw new Error(`Failed for ${level}`)
-          const blob = await res.blob()
-          const url = window.URL.createObjectURL(blob)
-          const a = document.createElement("a")
-          a.href = url
-          a.download = `syllabus_${industry}_${career}_${level}.pdf`
-          document.body.appendChild(a)
-          a.click()
-          a.remove()
-          window.URL.revokeObjectURL(url)
-          setProgress(prev => ({ ...prev, [level]: "done" }))
-        } catch (err) {
+          }
+        }
+        if (!success) {
           setProgress(prev => ({ ...prev, [level]: "error" }))
-          setError((err as Error).message)
+          setError((lastError as Error).message)
         }
       })
     )
